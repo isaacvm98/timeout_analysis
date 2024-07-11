@@ -4,7 +4,7 @@ from nba_api.stats.endpoints import playbyplay,leaguegamefinder,leaguedashteamst
 from nba_api.stats.static import teams
 from time import sleep
 from tqdm import tqdm
-
+DATA_PATH = r'C:\Users\isaac\Desktop\Proyectos\nba_analysis\timeout_analysis\preprocessing\data'
 # Define a helper function to handle coalesce logic
 def coalesce(*args):
     return next((arg for arg in args if pd.notnull(arg)), np.nan)
@@ -31,42 +31,22 @@ def period_change(x):
     changes = x.index[x.shift(-1) != x]  # Get indices where period changes
     return changes[0] if not changes.empty else np.inf
 
+SEASONS = ['2019','2020','2021','2022','2023']
 teams_ids = [x['id'] for x in teams.get_teams()]
-
-SEASONS = ['2021','2022','2023']
-
-all_games = []
+all_games_df = pd.DataFrame()
 for team in teams_ids:
     games = leaguegamefinder.LeagueGameFinder(team_id_nullable=team).get_data_frames()[0]
     games['SEASON_YEAR'] = games['SEASON_ID'].str[-4:]
     games = games[games['SEASON_YEAR'].isin(SEASONS)]
     games['GAME_DATE'] = pd.to_datetime(games['GAME_DATE'])
-    all_games.extend(games['GAME_ID'].to_list())
+    all_games_df = pd.concat([all_games_df,games],ignore_index=True)
 
-all_games = list(set(all_games))
-df = pd.DataFrame()
-for game in tqdm(all_games):
-    pbp = playbyplay.PlayByPlay(game_id=game).get_data_frames()[0]
-    df = pd.concat([df,pbp],ignore_index=True)
-    sleep(1)
-
-df = pd.DataFrame()
-for game in tqdm(all_games):
-    if game in df['GAME_ID'].unique():
-        continue
-    else:
-        pbp = playbyplay.PlayByPlay(game_id=game).get_data_frames()[0]
-        df = pd.concat([df,pbp],ignore_index=True)
-        sleep(1)
-df = pd.DataFrame()
-for game in tqdm(all_games):
-    if game in df['GAME_ID'].unique():
-        continue
-    else:
-        pbp = playbyplay.PlayByPlay(game_id=game).get_data_frames()[0]
-        df = pd.concat([df,pbp],ignore_index=True)
-        sleep(1)
-df.to_pickle(f'pbp_{SEASONS[0]}-{SEASONS[-1]}.pkl')
+# df = pd.DataFrame()
+# for game in tqdm(all_games_df['GAME_ID'].unique()):
+#     pbp = playbyplay.PlayByPlay(game_id=game).get_data_frames()[0]
+#     df = pd.concat([df,pbp],ignore_index=True)
+#     sleep(1)
+# df.to_pickle(DATA_PATH+f'\pbp_{SEASONS[0]}-{SEASONS[-1]}.pkl')
 
 print('Finished downloading play-by-play data')
 
@@ -83,6 +63,13 @@ def determine_possession(row):
             return row['AwayName']
     # Default case where only one of the descriptions is present
     return row['AwayName'] if row['VISITORDESCRIPTION'] else row['HomeName']
+
+teams_name_df = all_games_df[(all_games_df['MATCHUP'].str.contains('vs'))][['GAME_ID']]
+teams_name_df['HomeName'] = all_games_df[(all_games_df['MATCHUP'].str.contains('vs'))]['MATCHUP'].str.split('vs.',expand=True)[0]
+teams_name_df['AwayName'] = all_games_df[(all_games_df['MATCHUP'].str.contains('vs'))]['MATCHUP'].str.split('vs.',expand=True)[1]
+
+df = pd.read_pickle(DATA_PATH+'\pbp_2019-2023.pkl')
+df = df.merge(teams_name_df,on='GAME_ID')
 # Load the dataset
 pbp_raw = df.copy()
 
@@ -91,11 +78,6 @@ pbp = pbp_raw.copy()
 
 # Convert game clock display to seconds remaining
 pbp['qtr_seconds_remaining'] = pbp['PCTIMESTRING'].apply(lambda x: int(x.split(':')[0]) * 60 + int(x.split(':')[1]))
-pbp['AwayName'] = ''
-pbp['HomeName'] = ''
-for game in pbp['GAME_ID'].unique():
-    pbp.loc[pbp['GAME_ID']==game,'AwayName'] = pbp[(pbp['EVENTMSGTYPE']==9)&(pbp['GAME_ID']==game)]['VISITORDESCRIPTION'].str.split(' ',expand=True)[0].value_counts().index[0].capitalize()
-    pbp.loc[pbp['GAME_ID']==game,'HomeName'] = pbp[(pbp['EVENTMSGTYPE']==9)&(pbp['GAME_ID']==game)]['HOMEDESCRIPTION'].str.split(' ',expand=True)[0].value_counts().index[0].capitalize()
 # Data formatted so that events attributed to possessing team
 # Remove non-action events
 pbp = pbp[(pbp['NEUTRALDESCRIPTION'].isnull())]
@@ -117,7 +99,7 @@ pbp['possession'] = pbp.apply(determine_possession, axis=1)
 pbp['possession'] = pbp.groupby(['GAME_ID', 'possession'])['possession'].transform(getmode)
 
 # # Assign key column to clusters of data
-pbp['possession_id'] = pbp.groupby('GAME_ID')['possession'].apply(lambda x: (x != x.shift()).cumsum())
+pbp['possession_id'] = (pbp.groupby('GAME_ID')['possession'].apply(lambda x: (x != x.shift()).cumsum())).values
 pbp[['VISITORSCORE','HOMESCORE']] = pbp['SCORE'].str.split('-',expand=True)
 pbp['HOMESCORE'] = pbp['HOMESCORE'].astype(str).str.replace('None','NaN').astype(float)
 pbp['VISITORSCORE'] = pbp['VISITORSCORE'].astype(str).str.replace('None','NaN').astype(float)
@@ -154,10 +136,8 @@ possession_summary['home_poss'] = possession_summary['possession'] == possession
 possession_summary['offense'] = np.where(possession_summary['home_poss'], possession_summary['HomeName'], possession_summary['AwayName'])
 possession_summary['defense'] = np.where(possession_summary['home_poss'], possession_summary['AwayName'], possession_summary['HomeName'])
 possession_summary['gp'] = possession_summary['GAME_ID'].astype(str) + possession_summary['PERIOD'].astype(str)
-possession_summary.to_pickle(f'possession_summary_{SEASONS[0]}-{SEASONS[-1]}.pkl')
-
 possession_summary = possession_summary[(possession_summary['end_home_score']>0)|(possession_summary['end_away_score']>0)]
-
+possession_summary.to_pickle(DATA_PATH+f'\possession_summary_{SEASONS[0]}-{SEASONS[-1]}.pkl')
 print('Finished processing possessions')
 
 runs = possession_summary.copy()
@@ -372,6 +352,6 @@ times_df.columns = ['previous_run_time','last_run_time','time_spent_run','to_tim
 
 all_runs_to = pd.concat([all_runs_to,times_df],axis=1)
 
-all_runs_to.to_pickle(f'all_runs_to_{SEASONS[0]}-{SEASONS[-1]}.pkl')
+all_runs_to.to_pickle(DATA_PATH+'\all_runs_to_{SEASONS[0]}-{SEASONS[-1]}.pkl')
 
 print('Finished processing runs')
