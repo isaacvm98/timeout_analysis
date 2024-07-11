@@ -3,7 +3,7 @@ import numpy as np
 from nba_api.stats.endpoints import playbyplay,leaguegamefinder,leaguedashteamstats
 from nba_api.stats.static import teams
 from time import sleep
-from tqdm.notebook import tqdm
+from tqdm import tqdm
 
 # Define a helper function to handle coalesce logic
 def coalesce(*args):
@@ -44,6 +44,11 @@ for team in teams_ids:
     all_games.extend(games['GAME_ID'].to_list())
 
 all_games = list(set(all_games))
+df = pd.DataFrame()
+for game in tqdm(all_games):
+    pbp = playbyplay.PlayByPlay(game_id=game).get_data_frames()[0]
+    df = pd.concat([df,pbp],ignore_index=True)
+    sleep(1)
 
 df = pd.DataFrame()
 for game in tqdm(all_games):
@@ -52,7 +57,15 @@ for game in tqdm(all_games):
     else:
         pbp = playbyplay.PlayByPlay(game_id=game).get_data_frames()[0]
         df = pd.concat([df,pbp],ignore_index=True)
-        sleep(2)
+        sleep(1)
+df = pd.DataFrame()
+for game in tqdm(all_games):
+    if game in df['GAME_ID'].unique():
+        continue
+    else:
+        pbp = playbyplay.PlayByPlay(game_id=game).get_data_frames()[0]
+        df = pd.concat([df,pbp],ignore_index=True)
+        sleep(1)
 df.to_pickle(f'pbp_{SEASONS[0]}-{SEASONS[-1]}.pkl')
 
 print('Finished downloading play-by-play data')
