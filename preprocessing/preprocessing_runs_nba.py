@@ -50,7 +50,7 @@ for team in teams_ids:
 
 print('Finished downloading play-by-play data')
 
-# Define keywords for turnovers
+# # Define keywords for turnovers
 turnover_keywords = ['BLOCK', 'STEAL']
 
 # Function to determine possession
@@ -140,7 +140,7 @@ possession_summary = possession_summary[(possession_summary['end_home_score']>0)
 possession_summary.to_pickle(DATA_PATH+f'\possession_summary_{SEASONS[0]}-{SEASONS[-1]}.pkl')
 print('Finished processing possessions')
 
-runs = possession_summary.copy()
+runs = pd.read_pickle(DATA_PATH+f'\possession_summary_{SEASONS[0]}-{SEASONS[-1]}.pkl')
 
 runs['run_id'] = (runs.groupby(['GAME_ID','score'])['offense'].apply(lambda x: (x != x.shift()).cumsum()) + 1).values
 runs['run_id_gp'] = ((runs.groupby(['gp','score'])['offense'].apply(lambda x: (x != x.shift()).cumsum()))+1).values
@@ -178,7 +178,7 @@ dict_all_runs = {
     'to_team': []
 }
 
-for ix, group in runs.groupby(['gp', 'run_id_gp']):
+for ix, group in tqdm(runs.groupby(['gp', 'run_id_gp'])):
     run_id = group['run_id_gp'].iloc[0]
     gp = group['gp'].iloc[0]
     home_team = group['HomeName'].iloc[0]
@@ -312,7 +312,7 @@ for ix, row in all_runs_to.iterrows():
         else:
             all_runs_to.loc[ix,'to_team'] = row['away_team']
     else:
-        all_runs_to.loc[ix,'to_team'] = np.NaN
+        all_runs_to.loc[ix,'to_team'] = np.nan
 
 for ix, row in all_runs_to.iterrows():
     if row['to']==1:
@@ -321,7 +321,7 @@ for ix, row in all_runs_to.iterrows():
         else:
             all_runs_to.loc[ix,'to_non_run'] = 0
     else:
-        all_runs_to.loc[ix,'to_non_run'] = np.NaN
+        all_runs_to.loc[ix,'to_non_run'] = np.nan
 
 to_sec_start_df = runs[(runs['home_timeout_after']==True)|(runs['away_timeout_after']==True)].groupby(['gp','run_id_gp'],as_index=False)['to_start'].last()
 dict_times = {'previous_time_list' : [],
@@ -340,7 +340,7 @@ for ix,group in tqdm(runs.groupby(['gp','run_id_gp'])):
         time_spent = previous_run_min_time - min_time
     df_sec_to = to_sec_start_df.loc[(to_sec_start_df['gp']==gp)&(to_sec_start_df['run_id_gp']==run_id)]
     if df_sec_to.empty:
-        to_time = np.NaN
+        to_time = np.nan
     else:
         to_time = df_sec_to['to_start'].iloc[0]
     dict_times['previous_time_list'].append(previous_run_min_time)
@@ -352,6 +352,6 @@ times_df.columns = ['previous_run_time','last_run_time','time_spent_run','to_tim
 
 all_runs_to = pd.concat([all_runs_to,times_df],axis=1)
 
-all_runs_to.to_pickle(DATA_PATH+'\all_runs_to_{SEASONS[0]}-{SEASONS[-1]}.pkl')
+all_runs_to.to_pickle(f'all_runs_to_{SEASONS[0]}-{SEASONS[-1]}.pkl')
 
 print('Finished processing runs')
