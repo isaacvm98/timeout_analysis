@@ -70,11 +70,8 @@ teams_name_df['AwayName'] = all_games_df[(all_games_df['MATCHUP'].str.contains('
 
 df = pd.read_pickle(DATA_PATH+'\pbp_2019-2023.pkl')
 df = df.merge(teams_name_df,on='GAME_ID')
-# Load the dataset
-pbp_raw = df.copy()
-
 # Turn play-by-play data into possessions
-pbp = pbp_raw.copy()
+pbp = df.copy()
 
 # Convert game clock display to seconds remaining
 pbp['qtr_seconds_remaining'] = pbp['PCTIMESTRING'].apply(lambda x: int(x.split(':')[0]) * 60 + int(x.split(':')[1]))
@@ -99,7 +96,7 @@ pbp['possession'] = pbp.apply(determine_possession, axis=1)
 pbp['possession'] = pbp.groupby(['GAME_ID', 'possession'])['possession'].transform(getmode)
 
 # # Assign key column to clusters of data
-pbp['possession_id'] = (pbp.groupby('GAME_ID')['possession'].apply(lambda x: (x != x.shift()).cumsum())).values
+pbp['possession_id'] = pbp.groupby('GAME_ID')['possession'].apply(lambda x: (x != x.shift()).cumsum()+1).values
 pbp[['VISITORSCORE','HOMESCORE']] = pbp['SCORE'].str.split('-',expand=True)
 pbp['HOMESCORE'] = pbp['HOMESCORE'].astype(str).str.replace('None','NaN').astype(float)
 pbp['VISITORSCORE'] = pbp['VISITORSCORE'].astype(str).str.replace('None','NaN').astype(float)
@@ -137,6 +134,8 @@ possession_summary['offense'] = np.where(possession_summary['home_poss'], posses
 possession_summary['defense'] = np.where(possession_summary['home_poss'], possession_summary['AwayName'], possession_summary['HomeName'])
 possession_summary['gp'] = possession_summary['GAME_ID'].astype(str) + possession_summary['PERIOD'].astype(str)
 possession_summary = possession_summary[(possession_summary['end_home_score']>0)|(possession_summary['end_away_score']>0)]
+leaguegamefinder.LeagueGameFinder(game_id_nullable=possession_summary['GAME_ID'].iloc[0])
+leaguegamefinder.LeagueGameFinder(game_id_nullable=possession_summary['GAME_ID'].iloc[-1])
 possession_summary.to_pickle(DATA_PATH+f'\possession_summary_{SEASONS[0]}-{SEASONS[-1]}.pkl')
 print('Finished processing possessions')
 
@@ -144,6 +143,13 @@ runs = pd.read_pickle(DATA_PATH+f'\possession_summary_{SEASONS[0]}-{SEASONS[-1]}
 
 runs['run_id'] = (runs.groupby(['GAME_ID','score'])['offense'].apply(lambda x: (x != x.shift()).cumsum()) + 1).values
 runs['run_id_gp'] = ((runs.groupby(['gp','score'])['offense'].apply(lambda x: (x != x.shift()).cumsum()))+1).values
+runs.reset_index(inplace=True,drop=True)
+runs['to_start'] = runs['start'] - 1
+
+runs = pd.read_pickle(DATA_PATH+f'\possession_summary_{SEASONS[0]}-{SEASONS[-1]}.pkl')
+
+runs['run_id'] = runs.groupby(['GAME_ID'])['offense'].apply(lambda x: (x != x.shift()).cumsum()+1).values
+runs['run_id_gp'] = runs.groupby(['gp'])['offense'].apply(lambda x: (x != x.shift()).cumsum()+1).values
 runs.reset_index(inplace=True,drop=True)
 runs['to_start'] = runs['start'] - 1
 
@@ -186,8 +192,8 @@ for ix, group in tqdm(runs.groupby(['gp', 'run_id_gp'])):
     home_score = group['end_home_score'].iloc[-1]
     away_score = group['end_away_score'].iloc[-1]
     run_length = group.shape[0]
-    run_team = group['offense'].iloc[0]
-    previous_run_team = group['defense'].iloc[0]
+    run_team = group['possession'].transform(getmode).iloc[0]
+    previous_run_team = group['defense'].transform(getmode).iloc[0]
     gp_int = int(gp)
     # Calculate timeouts and run changes
     if True in group['home_timeout_after'].values:
@@ -331,6 +337,52 @@ dict_times = {'previous_time_list' : [],
 for ix,group in tqdm(runs.groupby(['gp','run_id_gp'])):
     min_time = group['start'].min()
     gp = group['gp'].iloc[0]
+    run_id = group['run_id_gp'].iloc[0]
+    if run_id == 2:
+        previous_run_min_time = 720
+        time_spent = previous_run_min_time - min_time
+    else:
+        previous_run_min_time = runs[(runs['gp']==gp)&(runs['run_id_gp']==run_id-1)]['start'].min()
+        time_spent = previous_run_min_time - min_time
+    df_sec_to = to_sec_start_df.loc[(to_sec_start_df['gp']==gp)&(to_sec_start_df['run_id_gp']==run_id)]
+    if df_sec_to.empty:
+        to_time = np.nan
+    else:
+        to_time = df_sec_to['to_start'].iloc[0]
+    dict_times['previous_time_list'].append(previous_run_min_time)
+    dict_times['min_time_list'].append(min_time)
+    dict_times['time_spent_list'].append(time_spent)
+    dict_times['to_time_list '].append(to_time)
+times_df = pd.DataFrame(dict_times)
+times_df.columns = ['previous_run_time','last_run_time','time_spent_run','to_time']
+
+all_runs_to = pd.concat([all_runs_to,times_df],axis=1)
+
+for ix, row in all_runs_to.iterrows():
+    if row['to']==1:
+        if row['home_to']==1:
+            all_runs_to.loc[ix,'to_team'] = row['home_team']
+        else:
+            all_runs_to.loc[ix,'to_team'] = row['away_team']
+    else:
+        all_runs_to.loc[ix,'to_team'] = np.nan
+
+for ix, row in all_runs_to.iterrows():
+    if row['to']==1:
+        if row['run_team'] != row['to_team']:
+            all_runs_to.loc[ix,'to_non_run'] = 1
+        else:
+            all_runs_to.loc[ix,'to_non_run'] = 0
+    else:
+        all_runs_to.loc[ix,'to_non_run'] = np.nan
+
+to_sec_start_df = runs[(runs['home_timeout_after']==True)|(runs['away_timeout_after']==True)].groupby(['gp','run_id_gp'],as_index=False)['to_start'].last()
+dict_times = {'previous_time_list' : [],
+'min_time_list' : [],
+'time_spent_list' : [],
+'to_time_list ': []}
+for ix,group in tqdm(runs.groupby(['gp','run_id_gp'])):
+    min_time = group['start'].min()
     run_id = group['run_id_gp'].iloc[0]
     if run_id == 2:
         previous_run_min_time = 720
