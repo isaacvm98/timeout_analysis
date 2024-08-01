@@ -89,7 +89,7 @@ pbp = pbp[~pbp['HOMEDESCRIPTION'].fillna('').str.contains("FOUL")]
 # Note upcoming timeouts before removing them
 pbp['home_timeout_after'] = pbp['HOMEDESCRIPTION'].shift(-1).fillna('').str.contains("Timeout")
 pbp['away_timeout_after'] = pbp['VISITORDESCRIPTION'].shift(-1).fillna('').str.contains("Timeout")
-pbp = pbp[~pbp['VISITORDESCRIPTION'].fillna('').str.contains("Timeout") & ~pbp['HOMEDESCRIPTION'].fillna('').str.contains("Timeout")]
+#pbp = pbp[~pbp['VISITORDESCRIPTION'].fillna('').str.contains("Timeout") & ~pbp['HOMEDESCRIPTION'].fillna('').str.contains("Timeout")]
 pbp['possession'] = pbp.apply(determine_possession, axis=1)
 
 # # Group by GameID and possession
@@ -138,13 +138,6 @@ leaguegamefinder.LeagueGameFinder(game_id_nullable=possession_summary['GAME_ID']
 leaguegamefinder.LeagueGameFinder(game_id_nullable=possession_summary['GAME_ID'].iloc[-1])
 possession_summary.to_pickle(DATA_PATH+f'\possession_summary_{SEASONS[0]}-{SEASONS[-1]}.pkl')
 print('Finished processing possessions')
-
-runs = pd.read_pickle(DATA_PATH+f'\possession_summary_{SEASONS[0]}-{SEASONS[-1]}.pkl')
-
-runs['run_id'] = (runs.groupby(['GAME_ID','score'])['offense'].apply(lambda x: (x != x.shift()).cumsum()) + 1).values
-runs['run_id_gp'] = ((runs.groupby(['gp','score'])['offense'].apply(lambda x: (x != x.shift()).cumsum()))+1).values
-runs.reset_index(inplace=True,drop=True)
-runs['to_start'] = runs['start'] - 1
 
 runs = pd.read_pickle(DATA_PATH+f'\possession_summary_{SEASONS[0]}-{SEASONS[-1]}.pkl')
 
